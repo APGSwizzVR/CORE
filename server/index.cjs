@@ -55,7 +55,7 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
   let db;
   try { db = JSON.parse(await fs.readFile(dbPath, 'utf8')); }
   catch { db = { users: [], sessions: [], servers: [], memberships: [], channels: [], messages: [], invites: [], friendships: [], conversations: [] }; }
-  for (const key of ['users', 'sessions', 'servers', 'memberships', 'channels', 'messages', 'invites', 'friendships', 'conversations', 'assets', 'friendRequests', 'blocks', 'events', 'reports', 'auditLog']) db[key] ||= [];
+  for (const key of ['users', 'sessions', 'servers', 'memberships', 'channels', 'messages', 'invites', 'serverInvitations', 'friendships', 'conversations', 'assets', 'friendRequests', 'blocks', 'events', 'reports', 'auditLog']) db[key] ||= [];
   let writeChain = Promise.resolve();
   const save = () => {
     writeChain = writeChain.then(async () => {
@@ -146,7 +146,12 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     const conversations = db.conversations.filter((item) => item.memberIds.includes(userId)).map((item) => publicConversation(userId, item));
     const incomingRequests = db.friendRequests.filter((item) => item.toUserId === userId && !item.resolvedAt).map((item) => ({ ...item, user: safeUser(db.users.find((entry) => entry.id === item.fromUserId)) }));
     const outgoingRequests = db.friendRequests.filter((item) => item.fromUserId === userId && !item.resolvedAt).map((item) => ({ ...item, user: safeUser(db.users.find((entry) => entry.id === item.toUserId)) }));
-    return { user: safeUser(db.users.find((item) => item.id === userId)), servers, friends, conversations, incomingRequests, outgoingRequests };
+    const incomingServerInvites = db.serverInvitations.filter((item) => item.toUserId === userId && !item.respondedAt && (!item.expiresAt || item.expiresAt > Date.now())).map((item) => ({
+      ...item,
+      server: db.servers.find((server) => server.id === item.serverId),
+      inviter: safeUser(db.users.find((entry) => entry.id === item.fromUserId)),
+    })).filter((item) => item.server && item.inviter);
+    return { user: safeUser(db.users.find((item) => item.id === userId)), servers, friends, conversations, incomingRequests, outgoingRequests, incomingServerInvites };
   }
   function sessionCookie(token, maxAge, secure = false) {
     return `core_session=${encodeURIComponent(token)}; HttpOnly; SameSite=${secure ? 'None' : 'Strict'};${secure ? ' Secure;' : ''} Path=/; Max-Age=${maxAge}`;
@@ -448,10 +453,14 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
   });
 
   app.post('/api/servers/:serverId/invites', requireAuth, async (req, res) => {
-    const expiryHours = z.number().int().min(1).max(720).safeParse(req.body?.expiryHours ?? 24);
+    const expiryHours = z.number().int().min(0).max(720).safeParse(req.body?.expiryHours ?? 24);
+    const maxUses = req.body?.maxUses == null ? { success: true, data: null } : z.number().int().min(1).max(1000).safeParse(req.body.maxUses);
     if (!ownsServer(req.user.id, req.params.serverId)) return res.status(403).json({ error: 'You need to be a server member to invite people.' });
-    if (!expiryHours.success) return res.status(400).json({ error: 'Invite expiry must be between 1 hour and 30 days.' });
-    const invite = { id: crypto.randomBytes(8).toString('base64url'), serverId: req.params.serverId, createdBy: req.user.id, createdAt: Date.now(), expiresAt: Date.now() + expiryHours.data * 3600000, revokedAt: null };
+    if (!expiryHours.success || !maxUses.success) return res.status(400).json({ error: 'Choose an expiry from never to 30 days and a use limit from 1 to 1,000.' });
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let code = '';
+    do { code = Array.from({ length: 8 }, () => alphabet[crypto.randomInt(alphabet.length)]).join(''); } while (db.invites.some((item) => item.id === code));
+    const invite = { id: code, serverId: req.params.serverId, createdBy: req.user.id, createdAt: Date.now(), expiresAt: expiryHours.data ? Date.now() + expiryHours.data * 3600000 : null, maxUses: maxUses.data, uses: 0, revokedAt: null };
     db.invites.push(invite);
     await save();
     const publicUrl = (process.env.CORE_PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
@@ -467,12 +476,64 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
   });
   app.post('/api/invites/:inviteId/accept', requireAuth, async (req, res) => {
     const invite = db.invites.find((i) => i.id === req.params.inviteId);
-    if (!invite || invite.revokedAt || invite.expiresAt <= Date.now()) return res.status(410).json({ error: 'This invite has expired or been revoked.' });
-    if (!ownsServer(req.user.id, invite.serverId)) db.memberships.push({ serverId: invite.serverId, userId: req.user.id, role: 'member', joinedAt: new Date().toISOString() });
+    if (!invite) return res.status(410).json({ error: 'This invite is no longer available.' });
+    const joining = !ownsServer(req.user.id, invite.serverId);
+    if (joining && (invite.revokedAt || (invite.expiresAt && invite.expiresAt <= Date.now()) || (invite.maxUses != null && (invite.uses || 0) >= invite.maxUses))) return res.status(410).json({ error: invite.revokedAt ? 'This invite has been revoked.' : 'This invite has expired or reached its use limit.' });
+    if (joining) {
+      db.memberships.push({ serverId: invite.serverId, userId: req.user.id, role: 'member', joinedAt: new Date().toISOString() });
+      invite.uses = (invite.uses || 0) + 1;
+    }
     await save();
     await syncServerRooms(invite.serverId);
     const server = db.servers.find((s) => s.id === invite.serverId);
-    res.json({ server: { ...server, channels: db.channels.filter((c) => c.serverId === server.id), members: publicMembers(server.id) } });
+    res.json({ server: { ...server, channels: db.channels.filter((c) => c.serverId === server.id && canAccessChannel(req.user.id, c)), members: publicMembers(server.id) } });
+  });
+
+  app.post('/api/servers/:serverId/direct-invites', requireAuth, async (req, res) => {
+    if (!ownsServer(req.user.id, req.params.serverId)) return res.status(403).json({ error: 'You need to be a server member to invite people.' });
+    if (!db.servers.some((server) => server.id === req.params.serverId)) return res.status(404).json({ error: 'Space not found.' });
+    const friendIds = z.array(z.string().min(1).max(80)).min(1).max(50).safeParse(req.body?.friendIds);
+    const expiryHours = z.number().int().min(0).max(720).safeParse(req.body?.expiryHours ?? 24);
+    if (!friendIds.success || !expiryHours.success) return res.status(400).json({ error: 'Choose at least one friend and a valid invite duration.' });
+    const uniqueIds = [...new Set(friendIds.data)];
+    if (uniqueIds.some((friendId) => friendId === req.user.id || !hasFriendship(req.user.id, friendId) || isBlocked(req.user.id, friendId))) return res.status(403).json({ error: 'Direct invites can only be sent to people in your friend list.' });
+    const expiresAt = expiryHours.data ? Date.now() + expiryHours.data * 3600000 : null;
+    const invited = [];
+    for (const friendId of uniqueIds) {
+      if (ownsServer(friendId, req.params.serverId)) continue;
+      const pending = db.serverInvitations.some((item) => item.serverId === req.params.serverId && item.toUserId === friendId && !item.respondedAt && (!item.expiresAt || item.expiresAt > Date.now()));
+      if (pending) continue;
+      const invitation = { id: id(), serverId: req.params.serverId, fromUserId: req.user.id, toUserId: friendId, createdAt: Date.now(), expiresAt, respondedAt: null, status: 'pending' };
+      db.serverInvitations.push(invitation);
+      invited.push({ invitation, user: safeUser(db.users.find((item) => item.id === friendId)) });
+    }
+    await save();
+    for (const item of invited) io.to(`user:${item.user.id}`).emit('server:invite');
+    res.status(201).json({ invited: invited.map((item) => item.user), skipped: uniqueIds.length - invited.length });
+  });
+
+  app.post('/api/server-invites/:invitationId/accept', requireAuth, async (req, res) => {
+    const invitation = db.serverInvitations.find((item) => item.id === req.params.invitationId && item.toUserId === req.user.id && !item.respondedAt);
+    if (!invitation) return res.status(404).json({ error: 'This invitation is no longer available.' });
+    if (invitation.expiresAt && invitation.expiresAt <= Date.now()) {
+      invitation.respondedAt = Date.now(); invitation.status = 'expired'; await save();
+      return res.status(410).json({ error: 'This invitation has expired.' });
+    }
+    const server = db.servers.find((item) => item.id === invitation.serverId);
+    if (!server) return res.status(404).json({ error: 'This space no longer exists.' });
+    invitation.respondedAt = Date.now(); invitation.status = 'accepted';
+    if (!ownsServer(req.user.id, server.id)) db.memberships.push({ serverId: server.id, userId: req.user.id, role: 'member', joinedAt: new Date().toISOString() });
+    await save(); await syncServerRooms(server.id);
+    io.to(`server:${server.id}`).emit('server:updated', { serverId: server.id });
+    io.to(`user:${invitation.fromUserId}`).emit('server:invite-updated');
+    res.json({ server: { ...server, channels: db.channels.filter((channel) => channel.serverId === server.id && canAccessChannel(req.user.id, channel)), members: publicMembers(server.id) } });
+  });
+  app.post('/api/server-invites/:invitationId/decline', requireAuth, async (req, res) => {
+    const invitation = db.serverInvitations.find((item) => item.id === req.params.invitationId && item.toUserId === req.user.id && !item.respondedAt);
+    if (!invitation) return res.status(404).json({ error: 'This invitation is no longer available.' });
+    invitation.respondedAt = Date.now(); invitation.status = 'declined'; await save();
+    io.to(`user:${invitation.fromUserId}`).emit('server:invite-updated');
+    res.json({ ok: true });
   });
 
   app.post('/api/friends', requireAuth, async (req, res) => {
@@ -935,3 +996,4 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
 }
 
 module.exports = { startServer };
+

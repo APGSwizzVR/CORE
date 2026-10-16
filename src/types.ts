@@ -13,4 +13,6 @@ export type Attachment = { url: string; name: string; mime: string; size: number
 export type Message = { id: string; scope: 'channel' | 'dm'; channelId?: string; conversationId?: string; threadParentId?: string; threadReplyCount?: number; authorId: string; author: string; handle?: string; avatar: string | null; text: string; createdAt: string; editedAt?: string; pinnedAt?: number; reactions?: MessageReaction[]; attachments?: Attachment[]; poll?: Poll; system?: boolean };
 export type Conversation = { id: string; memberIds: string[]; otherUser: User; members?: User[]; isGroup?: boolean; name?: string; createdAt: string };
 export type FriendRequest = { id: string; fromUserId: string; toUserId: string; createdAt: number; user: User };
-export type Invite = { id: string; serverId: string; createdAt: number; expiresAt: number; revokedAt: number | null };
+export type Invite = { id: string; serverId: string; createdAt: number; expiresAt: number | null; maxUses: number | null; uses: number; revokedAt: number | null };
+export type ServerInvitation = { id: string; serverId: string; fromUserId: string; toUserId: string; createdAt: number; expiresAt: number | null; respondedAt: number | null; status: 'pending'; server: Pick<Server, 'id' | 'name' | 'icon' | 'banner' | 'description'>; inviter: User };
+
