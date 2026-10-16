@@ -104,7 +104,7 @@ export default function App() {
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const typingTimer = useRef<number>();
+  const typingTimer = useRef<number | undefined>(undefined);
   const activeServer = servers.find((server) => server.id === activeServerId) || null;
   const activeChannel = activeServer?.channels.find((channel) => channel.id === activeChannelId) || null;
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) || null;
