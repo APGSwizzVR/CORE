@@ -1,104 +1,104 @@
 # CORE
 
-CORE is a Windows-first desktop chat app with a quieter, more considered take on the familiar server, channel, and conversation layout. Its desktop shell is Electron; the interface is React, TypeScript, and Vite; and the included Node service handles accounts, stored messages, uploads, presence, and WebRTC signaling.
+CORE is a Windows-first community chat app with a quieter, more considered take on the familiar server, channel, and conversation layout. Its UI uses an original CORE identity, a soft pointer-following violet light, compact transitions, and the Windows system UI font stack (Segoe UI Variable on supported Windows versions; Apple system fonts only when running on Apple platforms).
 
-## What works
+CORE has no premium tier, billing flow, or paid communication features.
 
-- Create an account, sign in, edit a profile, set presence, and choose an accent theme.
-- Create spaces and text or voice channels. Invite links can be copied, accepted, revoked by a space owner or admin, and configured to expire in one hour to 30 days.
-- Send live channel and one-to-one messages, edit or remove your own messages, add shared reactions, see typing and presence, browse recent history, and start one-to-one calls.
-- Share up to five validated image, video, audio, PDF, or text attachments per message (10 MB each).
-- Join voice rooms with microphone mute, deafen, camera, and screen-share controls. CORE shows when a participant has their camera on or is sharing; the Windows desktop app prompts you to choose the screen or app window.
-- Crop, zoom, and reposition JPG, PNG, or WebP profile and space artwork. Images are limited to 8 MB.
-- Upload and manage space emojis, stickers, and soundboard clips. Images are limited to 8 MB and audio to 10 MB.
-- Edit a space name and description, update its icon and banner, and manage members, invites, and shared assets.
-- Use the built-in emoji, sticker, and soundboard choices, and switch among four accent themes, light appearance, or system appearance.
-- Configure server and member roles. Server and channel endpoints check membership, and space asset and role management is restricted to owners and admins.
+## What works in this build
 
-## Run the desktop app
+- Accounts, sign-in/out, salted password hashing, profile details, avatar/banner image crop, presence states, and accent themes.
+- Spaces with custom names, descriptions, cropped icons and banners; invite links that can be copied, accepted, revoked, and set to expire.
+- Text and voice channels with categories, topics, private member access, and text slow mode. Private-channel access is checked by the HTTP API and live Socket.IO rooms.
+- Owner/admin/member space roles, member lists, role changes, and message reports with a moderator review queue.
+- Live server chat and one-to-one DMs, group DMs (up to ten people), message edits/deletion, reactions, threads, pins, polls, history search with author/date/attachment filters, and attachment previews.
+- Scheduled space events with channel locations and live RSVPs.
+- Built-in emojis, stickers, and local soundboard playback; admins can upload, preview, and remove space-specific emoji, sticker, and sound assets.
+- Microphone calls, camera video, screen/window sharing, mute/deafen, device selectors, camera quality, push-to-talk, connection state, and a dedicated Windows screen/window picker.
+- Crop, zoom, reposition, and preview JPG/PNG/WebP profile and space art. Image and file type/size validation runs on the server as well as in the interface.
+- Message formatting for bold, italic, strike-through, inline/fenced code, headings, lists, quotes, links, spoilers, and uploaded space emoji/stickers.
+
+## Run CORE on Windows
 
 Requirements: Node.js 24 and npm.
 
 ```powershell
-npm install
+npm ci
 npm run dev
 ```
 
-The development command starts the Vite interface and the local CORE service. The desktop app stores its local accounts, chats, and uploads under Electron's per-user application data folder. For a local web preview during development, run `npm run server` in one terminal and `npm run preview` in another.
+The development command starts the Vite interface and the local CORE service. Local accounts, messages, and uploads are stored under Electron's per-user application data directory.
 
-To package a Windows installer on a Windows machine:
+To make a Windows installer locally:
 
 ```powershell
-npm install
+npm ci
 npm run package:win
 ```
 
-The installer is written to `release/`. It is currently unsigned; Windows SmartScreen may show a publisher warning. A code-signing certificate is needed to sign it.
+The x64 NSIS installer is written to `release/`. It is currently unsigned; Windows SmartScreen may show a publisher warning.
 
-## Run a shared CORE server
+## Shared server setup
 
-Each desktop install is local by default. For shared accounts and conversations, run one CORE service on a machine reachable by your group and point each app to it from **Server setup** on the sign-in screen. Use HTTPS for a public service. A reverse proxy such as Caddy or nginx can terminate HTTPS and forward requests and WebSocket upgrades to port 4179.
+The desktop app is local-first. To share accounts and conversations across computers, host the CORE service on a reachable machine and enter its HTTPS address from **Server setup** on each app's sign-in screen. Put the service behind HTTPS and a reverse proxy that supports WebSocket upgrades before exposing it to the internet.
 
 For a Node deployment:
 
 ```powershell
 Copy-Item .env.example .env
-npm install
+npm ci
 npm run server
 ```
 
-Set `CORE_PUBLIC_URL` to the public HTTPS address so generated invite links point to the right place. Set `CORE_DATA_DIR` to persistent storage. `CORE_BIND_ADDRESS` defaults to `0.0.0.0`; set it to `127.0.0.1` when only a reverse proxy on the same machine should reach the service. Never commit `.env` or put `CORE_TURN_SECRET` in a desktop build.
-
-Docker Compose is also available:
+Docker Compose is also included:
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-The container binds to localhost port 4179 and keeps its database and uploads in a named volume. Configure the reverse proxy and set `CORE_PUBLIC_URL` before sharing it publicly.
+Set `CORE_PUBLIC_URL` to the public HTTPS address so generated invites work for invitees. Set `CORE_DATA_DIR` to persistent storage. The JSON file and uploaded assets should be backed up together. Never commit `.env` or put `CORE_TURN_SECRET` in a desktop build.
 
 ### Configuration
 
 | Variable | Purpose |
 | --- | --- |
-| `VITE_CORE_SERVER_URL` | Optional shared server URL embedded at build time. Normally leave blank and let each desktop user choose in Server setup. |
-| `PORT` | Standalone service port, default `4179`. |
-| `CORE_BIND_ADDRESS` | Standalone service bind address, default `0.0.0.0`. |
-| `CORE_PUBLIC_URL` | Public HTTPS origin used in invite links. |
-| `CORE_ALLOWED_ORIGINS` | Allowed Socket.IO browser origins. |
-| `CORE_DATA_DIR` | Directory for the JSON data file and uploaded files. |
+| `VITE_CORE_SERVER_URL` | Optional shared server URL embedded at build time. Usually leave blank so each user can enter a server from the sign-in screen. |
+| `PORT` | Standalone service port; default `4179`. |
+| `CORE_BIND_ADDRESS` | Standalone service bind address; default `0.0.0.0`. Use `127.0.0.1` behind a local reverse proxy. |
+| `CORE_PUBLIC_URL` | Public HTTPS origin used to create invite links. |
+| `CORE_ALLOWED_ORIGINS` | Comma-separated allowed web/Socket.IO origins. |
+| `CORE_DATA_DIR` | Persistent JSON database and upload directory. |
 | `CORE_STUN_URLS` | Comma-separated STUN URLs; defaults to Google's public STUN service. |
-| `CORE_TURN_URLS` | Optional comma-separated coturn TURN URLs. |
-| `CORE_TURN_SECRET` | Server-only coturn shared secret used to mint short-lived client credentials. |
+| `CORE_TURN_URLS` | Optional TURN relay URLs for networks where direct peer connections fail. |
+| `CORE_TURN_SECRET` | Optional coturn REST shared secret; used by the service to issue short-lived TURN credentials. Keep it on the server only. |
 
-Calls use peer-to-peer WebRTC. STUN can establish many connections; networks that block direct peer paths need a TURN relay such as coturn. A larger community would need a media SFU, which this prototype does not include. The ICE configuration endpoint creates one-hour coturn REST credentials when both TURN settings are configured.
+`.env.example` contains placeholders only. Do not use a development HTTP address for a public deployment; HTTPS is required for safe remote use and browser media permissions.
 
-## Architecture and safety
+## Architecture
 
-- **Desktop:** Electron creates a context-isolated, sandboxed window with Node integration disabled. Screen/window capture is presented through an explicit desktop picker.
-- **Interface:** React, TypeScript, Vite, and Lucide icons. The responsive layout includes server navigation, channel and DM lists, message history, people panel, profile and space dialogs, and call controls.
-- **Service:** Express and Socket.IO run in the desktop app for local use or separately for a shared deployment. Passwords are stored as salted scrypt hashes; session tokens are random and stored as hashes. Sessions use HTTP-only cookies. Login attempts are rate-limited.
-- **Storage:** A JSON file is atomically replaced on writes; uploads are stored alongside it. Back up the full `CORE_DATA_DIR` while the service is stopped. This simple single-process storage is suitable for a small group, not a high-traffic service or multiple server replicas.
-- **Input:** API payloads are validated, message and image/audio sizes are bounded, and uploaded file signatures are checked. Keep the service behind HTTPS for remote use.
+- **Desktop:** Electron with context isolation, renderer sandboxing, Node integration disabled, scoped media permission handling, and a preload bridge for the Windows display picker and privacy settings.
+- **Interface:** React, TypeScript, Vite, and Lucide icons. The desktop layout adapts to narrower windows and reduced-motion settings.
+- **Service:** Express and Socket.IO host authentication, authorization, message history, presence, uploads, server features, and WebRTC signaling. It runs locally inside the desktop app or separately for a shared deployment.
+- **Voice/video:** WebRTC media is sent directly between participants; Socket.IO carries signaling. Voice direct messages are limited to two participants, group DM calls to ten. A TURN relay improves reachability. Large calls need an SFU such as LiveKit, which is not bundled or configured here.
+- **Storage:** A single-process JSON store is atomically replaced on writes. It is suitable for local use and small private communities, not high-traffic deployments or multiple service replicas. Move to a transactional database and managed object storage before operating at scale.
 
-This is an early usable build, not a full implementation of every item in the supplied Discord feature inventory. It does not include email verification, password recovery, end-to-end message encryption, group DMs, threads, message search, polls, scheduled events, moderation audit history, bot/app integrations, or an SFU. There is no paid tier or billing. Media and voice calls require browser/OS microphone and camera access. Screen selection is provided by the Windows desktop picker. Screen and camera video use peer-to-peer WebRTC; larger calls need an SFU. TURN can improve connectivity on restrictive networks. Soundboard audio plays locally for the person who selects a sound; it is not mixed into voice chat. Invitations are web links to the shared CORE service and need that service to be reachable by invitees.
+## Feature limits
 
-## Windows releases on GitHub
+This is a working early build, not a feature-for-feature Discord replacement. Email/phone verification, password recovery, passkeys, two-factor authentication, device/session management, end-to-end encryption, account data export/deletion, custom permission roles, bans/timeouts, automated moderation, read receipts/unread markers, per-conversation notification rules, message forwarding, GIF search, external account connections, bots/apps, discovery/community onboarding, mobile clients, and a high-scale SFU are not implemented. Space roles are currently owner, admin, and member; private channels are assigned to individual members. Soundboard playback is local to the person who presses play and is not injected into voice audio. WebRTC camera/screenshare quality and reachability depend on devices, Windows privacy settings, and network/TURN configuration. No feature in CORE is paid.
 
-The repository includes two Actions workflows:
+## GitHub Actions and Windows releases
 
-- `Build Windows installer` runs on pushes to `main` and can also be started manually. Its installer is available from the workflow run for 30 days.
-- `Publish Windows release` runs when a version tag such as `v1.0.0` is pushed. It builds an NSIS installer, saves it as an Actions artifact, and attaches the `.exe` to a GitHub Release.
+`.github/workflows/build-windows.yml` builds an installer on pushes to `main` and manual runs. The installer is attached to the workflow run as a downloadable Actions artifact.
+
+`.github/workflows/release-windows.yml` builds the Windows installer when a version tag such as `v1.2.0` is pushed, attaches it to the GitHub Release, and also stores it as an Actions artifact.
 
 To publish a release from a checkout:
 
 ```powershell
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
-In GitHub, ensure **Settings → Actions → General → Workflow permissions** allows the repository `GITHUB_TOKEN` to write contents. The release job declares `contents: write`; it uses GitHub's automatically provided token and needs no personal access token or secret. Wait for the tagged workflow run to finish, then download the installer from the Releases page. Increase the version in `package.json` and use a new tag for each release.
+The release workflow declares `contents: write` and uses GitHub's automatic `GITHUB_TOKEN`; it needs no personal access token or workflow secret. In **Settings → Actions → General → Workflow permissions**, allow GitHub Actions to create releases/write repository contents. Increase the version in both `package.json` and `package-lock.json` and use a new tag for every release.
 
-The installer target is NSIS x64. The workflow does not sign the binary; configure a code-signing certificate separately if you need a trusted publisher identity.
-
+The current public repository is [APGSwizzVR/CORE](https://github.com/APGSwizzVR/CORE). After the tagged Actions run finishes, download the unsigned x64 installer from its [Releases page](https://github.com/APGSwizzVR/CORE/releases).
