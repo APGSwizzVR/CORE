@@ -1,6 +1,6 @@
 {
   "name": "core-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "CORE — a calmer place to talk",
   "author": "CORE",
@@ -10,8 +10,8 @@
     "server": "node server/standalone.cjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "package:win": "npm run build && electron-builder --win nsis --x64",
-    "package:win:dir": "npm run build && electron-builder --win dir --x64"
+    "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "package:win:dir": "npm run build && electron-builder --win dir --x64 --publish never"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -51,3 +51,4 @@
     }
   }
 }
+
