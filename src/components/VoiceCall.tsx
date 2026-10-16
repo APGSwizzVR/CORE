@@ -4,18 +4,19 @@ import { Camera, CameraOff, Check, Headphones, Mic, MicOff, MonitorUp, PhoneOff,
 import type { Socket } from 'socket.io-client';
 import type { User } from '../types';
 
-type Peer = { socketId: string; user: User };
+type Peer = { socketId: string; user: User; cameraOn?: boolean; sharing?: boolean };
 type Props = { channelId: string; channelName: string; socket: Socket | null; user: User; onLeave: () => void };
 type Tile = { peer: Peer; stream: MediaStream };
 const ICE: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
-function VideoTile({ name, avatar, stream, muted = false, local = false }: { name: string; avatar: string | null; stream?: MediaStream; muted?: boolean; local?: boolean }) {
+function VideoTile({ name, avatar, stream, muted = false, local = false, cameraOn = false, sharing = false }: { name: string; avatar: string | null; stream?: MediaStream; muted?: boolean; local?: boolean; cameraOn?: boolean; sharing?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (video.current && stream) video.current.srcObject = stream; }, [stream]);
   const hasVideo = stream?.getVideoTracks().some((track) => track.readyState === 'live');
-  return <div className={`video-tile ${hasVideo ? 'has-video' : ''} ${local ? 'local-tile' : ''}`}>
+  return <div className={`video-tile ${hasVideo ? 'has-video' : ''} ${local ? 'local-tile' : ''} ${sharing ? 'sharing-tile' : ''}`}>
     {hasVideo ? <video ref={video} autoPlay playsInline muted={muted} /> : <div className="voice-person"><span className="avatar avatar-xl">{avatar ? <img src={avatar} alt="" /> : name.slice(0, 1).toUpperCase()}</span><span className="voice-wave"><i /><i /><i /><i /><i /></span></div>}
     {!hasVideo && stream && <video ref={video} autoPlay playsInline muted={muted} className="audio-only" />}
+    {(sharing || cameraOn) && <span className="video-state">{sharing ? <><MonitorUp size={13} /> Sharing screen</> : <><Camera size={13} /> Camera on</>}</span>}
     <div className="video-name"><span className="audio-presence" />{name}{local ? ' · you' : ''}</div>
   </div>;
 }
@@ -126,10 +127,12 @@ export default function VoiceCall({ channelId, channelName, socket, user, onLeav
     const signalWrapped = (value: any) => signal(value);
     const leftWrapped = (value: any) => peerLeft(value);
     socket.on('voice:peer-joined', joinedWrapped); socket.on('voice:peer-left', leftWrapped); socket.on('voice:signal', signalWrapped);
+    const mediaState = ({ socketId, cameraOn: peerCameraOn, sharing: peerSharing }: { socketId: string; cameraOn: boolean; sharing: boolean }) => setPeers((items) => items.map((peer) => peer.socketId === socketId ? { ...peer, cameraOn: peerCameraOn, sharing: peerSharing } : peer));
+    socket.on('voice:media-state', mediaState);
     const interval = window.setInterval(() => { peersRef.current = peers; deafRef.current = deafened; }, 100);
     return () => {
       mounted.current = false; window.clearInterval(interval);
-      socket.off('voice:peer-joined', joinedWrapped); socket.off('voice:peer-left', leftWrapped); socket.off('voice:signal', signalWrapped);
+      socket.off('voice:peer-joined', joinedWrapped); socket.off('voice:peer-left', leftWrapped); socket.off('voice:signal', signalWrapped); socket.off('voice:media-state', mediaState);
       socket.emit('voice:leave');
       peerMap.current.forEach(({ pc }) => pc.close()); peerMap.current.clear();
       local.current?.getTracks().forEach((track) => track.stop()); local.current = null;
@@ -159,21 +162,21 @@ export default function VoiceCall({ channelId, channelName, socket, user, onLeav
   const toggleCamera = async () => {
     if (cameraOn) {
       local.current?.getVideoTracks().filter((track) => track.label !== 'screen-share').forEach((track) => { track.stop(); local.current?.removeTrack(track); });
-      setCameraOn(false); setStreams((items) => ({ ...items })); return;
+      setCameraOn(false); socket?.emit('voice:media-state', { cameraOn: false, sharing }); setStreams((items) => ({ ...items })); return;
     }
-    try { const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } }); addVideoTracks(stream); setCameraOn(true); setError(''); }
+    try { const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } }); addVideoTracks(stream); setCameraOn(true); socket?.emit('voice:media-state', { cameraOn: true, sharing }); setError(''); }
     catch { setError('Camera access is unavailable. Check Windows privacy settings.'); }
   };
   const shareScreen = async () => {
     if (sharing) {
       local.current?.getVideoTracks().filter((track) => track.label === 'screen-share').forEach((track) => { track.stop(); local.current?.removeTrack(track); });
-      setSharing(false); return;
+      setSharing(false); socket?.emit('voice:media-state', { cameraOn, sharing: false }); return;
     }
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 24 }, audio: false });
       const track = stream.getVideoTracks()[0]; Object.defineProperty(track, 'label', { value: 'screen-share' });
-      addVideoTracks(stream); setSharing(true); setError('');
-      track.onended = () => { local.current?.removeTrack(track); setSharing(false); };
+      addVideoTracks(stream); setSharing(true); socket?.emit('voice:media-state', { cameraOn, sharing: true }); setError('');
+      track.onended = () => { local.current?.removeTrack(track); setSharing(false); socket?.emit('voice:media-state', { cameraOn, sharing: false }); };
     } catch { setError('Screen sharing was cancelled or unavailable.'); }
   };
 
@@ -182,11 +185,12 @@ export default function VoiceCall({ channelId, channelName, socket, user, onLeav
     <div className="call-topline"><div><span className="eyebrow">VOICE SPACE</span><h2>{channelName}</h2><span className="call-subtitle">{audioReady ? `${peers.length + 1} ${peers.length ? 'people' : 'person'} here` : error || 'Connecting…'}</span></div><div className="call-secure"><Signal size={14} /><span>{connected ? 'Connected' : audioReady ? 'Ready to talk' : 'Joining voice'}</span><span className="call-dot" /></div></div>
     {!audioReady && error && <div className="call-error"><div className="call-error-icon"><MicOff size={21} /></div><div><strong>We couldn’t start your microphone</strong><p>{error}</p>{error.includes('Microphone access') && <button className="button subtle small" onClick={() => window.location.reload()}><Check size={14} /> Try again</button>}</div></div>}
     <div className={`call-stage ${allTiles.length < 2 ? 'single-stage' : ''}`}>
-      {audioReady && <VideoTile name={user.name} avatar={user.avatar} stream={local.current || undefined} muted local />}
-      {allTiles.map(({ peer, stream }) => <VideoTile key={peer.socketId} name={peer.user.name} avatar={peer.user.avatar} stream={stream} muted={deafened} />)}
+      {audioReady && <VideoTile name={user.name} avatar={user.avatar} stream={local.current || undefined} muted local cameraOn={cameraOn} sharing={sharing} />}
+      {allTiles.map(({ peer, stream }) => <VideoTile key={peer.socketId} name={peer.user.name} avatar={peer.user.avatar} stream={stream} muted={deafened} cameraOn={peer.cameraOn} sharing={peer.sharing} />)}
       {audioReady && peers.length === 0 && <div className="call-invite-hint"><span className="pulse-ring"><Signal size={17} /></span><strong>It’s quiet in here</strong><span>Invite someone to join the conversation.</span></div>}
     </div>
     {error && audioReady && <div className="call-warning"><span>{error}</span><button aria-label="Dismiss connection note" onClick={() => setError('')}>×</button></div>}
     <div className="call-controls"><div className="call-control-spacer" /><button className={`call-control ${muted ? 'is-active' : ''}`} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} title={muted ? 'Unmute microphone' : 'Mute microphone'} onClick={toggleMic}><span>{muted ? <MicOff /> : <Mic />}</span><small>{muted ? 'Unmute' : 'Mute'}</small></button><button className={`call-control ${deafened ? 'is-active' : ''}`} aria-label={deafened ? 'Undeafen' : 'Deafen'} title={deafened ? 'Undeafen' : 'Deafen'} onClick={toggleDeafen}><span>{deafened ? <VolumeX /> : <Headphones />}</span><small>{deafened ? 'Undeafen' : 'Deafen'}</small></button><button className={`call-control ${cameraOn ? 'is-on' : ''}`} aria-label={cameraOn ? 'Turn camera off' : 'Turn camera on'} title={cameraOn ? 'Turn camera off' : 'Turn camera on'} onClick={toggleCamera}><span>{cameraOn ? <Camera /> : <CameraOff />}</span><small>Camera</small></button><button className={`call-control ${sharing ? 'is-on' : ''}`} aria-label={sharing ? 'Stop sharing screen' : 'Share screen'} title={sharing ? 'Stop sharing screen' : 'Share screen'} onClick={shareScreen}><span>{sharing ? <Check /> : <MonitorUp />}</span><small>{sharing ? 'Stop share' : 'Share'}</small></button><button className="call-control hangup" aria-label="Leave voice channel" title="Leave voice channel" onClick={onLeave}><span><PhoneOff /></span><small>Leave</small></button><div className="call-control-spacer" /></div>
   </section>;
 }
+
