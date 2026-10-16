@@ -93,7 +93,7 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     next();
   });
   app.options('/api/*path', (req, res) => res.sendStatus(204));
-  app.use(express.json({ limit: '16mb' }));
+  app.use(express.json({ limit: '18mb' }));
   app.use('/uploads', express.static(uploadDir, { maxAge: '1d', immutable: true, fallthrough: false }));
   app.use((req, res, next) => {
     if (!['/api/auth/login', '/api/auth/register'].includes(req.path) || req.method !== 'POST') return next();
@@ -149,6 +149,17 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     }
   }
   function roomForChannel(channelId) { return `channel:${channelId}`; }
+  function roomForMessage(userId, message) {
+    if (message?.scope === 'channel') {
+      const channel = db.channels.find((item) => item.id === message.channelId);
+      return channel && ownsServer(userId, channel.serverId) ? roomForChannel(channel.id) : null;
+    }
+    if (message?.scope === 'dm') {
+      const conversation = db.conversations.find((item) => item.id === message.conversationId && item.memberIds.includes(userId));
+      return conversation ? `dm:${conversation.id}` : null;
+    }
+    return null;
+  }
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'CORE', mode: process.env.CORE_SERVER_URL ? 'remote' : 'local' }));
   app.get('/api/ice-servers', requireAuth, (req, res) => {
@@ -213,7 +224,7 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     const name = z.string().trim().min(2).max(32).safeParse(req.body?.name);
     const bio = z.string().trim().max(120).safeParse(req.body?.bio);
     const status = z.enum(['online', 'idle', 'dnd', 'invisible']).safeParse(req.body?.status);
-    const theme = z.enum(['violet', 'ocean', 'moss', 'rose']).safeParse(req.body?.theme);
+    const theme = z.enum(['violet', 'ocean', 'moss', 'rose', 'light', 'system']).safeParse(req.body?.theme);
     if (!name.success || !bio.success || !status.success || !theme.success) return res.status(400).json({ error: 'Check your profile details.' });
     Object.assign(req.user, { name: name.data, bio: bio.data, status: status.data, theme: theme.data });
     await save();
@@ -244,6 +255,46 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     res.json(type.startsWith('server') ? { server: db.servers.find((s) => s.id === serverId) } : { user: safeUser(req.user) });
   });
 
+  app.post('/api/attachments', requireAuth, async (req, res) => {
+    const name = z.string().trim().min(1).max(140).safeParse(req.body?.name);
+    const match = typeof req.body?.dataUrl === 'string' && req.body.dataUrl.match(/^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/);
+    if (!name.success || !match) return res.status(400).json({ error: 'Choose a supported image, video, audio, or document file.' });
+    const mime = match[1].toLowerCase();
+    const extByMime = { 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp', 'image/gif':'gif', 'video/mp4':'mp4', 'video/webm':'webm', 'audio/mpeg':'mp3', 'audio/wav':'wav', 'audio/ogg':'ogg', 'application/pdf':'pdf', 'text/plain':'txt' };
+    if (!extByMime[mime]) return res.status(415).json({ error: 'Use JPG, PNG, WebP, GIF, MP4, WebM, MP3, WAV, OGG, PDF, or text.' });
+    const bytes = Buffer.from(match[2], 'base64');
+    if (!bytes.length || bytes.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'Attachments must be smaller than 10 MB.' });
+    const valid = {
+      'image/jpeg': bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff,
+      'image/png': bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])),
+      'image/webp': bytes.subarray(0,4).toString() === 'RIFF' && bytes.subarray(8,12).toString() === 'WEBP',
+      'image/gif': ['GIF87a','GIF89a'].includes(bytes.subarray(0,6).toString()),
+      'video/mp4': bytes.subarray(4,8).toString() === 'ftyp',
+      'video/webm': bytes.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])),
+      'audio/mpeg': bytes.subarray(0,3).toString() === 'ID3' || (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0),
+      'audio/wav': bytes.subarray(0,4).toString() === 'RIFF' && bytes.subarray(8,12).toString() === 'WAVE',
+      'audio/ogg': bytes.subarray(0,4).toString() === 'OggS',
+      'application/pdf': bytes.subarray(0,5).toString() === '%PDF-',
+      'text/plain': !bytes.includes(0),
+    };
+    if (!valid[mime]) return res.status(400).json({ error: 'The file contents do not match the selected file type.' });
+    const safeName = name.data.replace(/[\\/\0]/g, '').trim();
+    const filename = `${req.user.id}-${crypto.randomBytes(12).toString('hex')}.${extByMime[mime]}`;
+    await fs.writeFile(path.join(uploadDir, filename), bytes, { mode: 0o600, flag: 'wx' });
+    res.status(201).json({ attachment: { url: `/uploads/${filename}`, name: safeName, mime, size: bytes.length } });
+  });
+
+  app.patch('/api/servers/:serverId', requireAuth, async (req, res) => {
+    if (!canManage(req.user.id, req.params.serverId)) return res.status(403).json({ error: 'Only a server owner or admin can change these settings.' });
+    const name = z.string().trim().min(2).max(48).safeParse(req.body?.name);
+    const description = z.string().trim().max(240).safeParse(req.body?.description);
+    if (!name.success || !description.success) return res.status(400).json({ error: 'Use a 2–48 character name and a description up to 240 characters.' });
+    const server = db.servers.find((item) => item.id === req.params.serverId);
+    if (!server) return res.status(404).json({ error: 'Space not found.' });
+    server.name = name.data; server.description = description.data;
+    await save();
+    res.json({ server });
+  });
   app.get('/api/servers/:serverId', requireAuth, (req, res) => {
     if (!ownsServer(req.user.id, req.params.serverId)) return res.status(403).json({ error: 'You do not have access to this server.' });
     const server = db.servers.find((s) => s.id === req.params.serverId);
@@ -383,6 +434,44 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     if (!channel || !ownsServer(req.user.id, channel.serverId)) return res.status(403).json({ error: 'You do not have access to this channel.' });
     res.json({ messages: db.messages.filter((m) => m.channelId === channel.id).slice(-100) });
   });
+  app.patch('/api/messages/:messageId', requireAuth, async (req, res) => {
+    const message = db.messages.find((item) => item.id === req.params.messageId);
+    const room = roomForMessage(req.user.id, message);
+    if (!message || !room) return res.status(404).json({ error: 'Message not found.' });
+    const channel = message.scope === 'channel' ? db.channels.find((item) => item.id === message.channelId) : null;
+    if (message.authorId !== req.user.id && !(channel && canManage(req.user.id, channel.serverId))) return res.status(403).json({ error: 'You can only edit your own messages.' });
+    const text = z.string().trim().min(1).max(2000).safeParse(req.body?.text);
+    if (!text.success) return res.status(400).json({ error: 'Messages need 1–2,000 characters.' });
+    message.text = text.data; message.editedAt = new Date().toISOString();
+    await save(); io.to(room).emit('chat:update', message);
+    res.json({ message });
+  });
+  app.delete('/api/messages/:messageId', requireAuth, async (req, res) => {
+    const index = db.messages.findIndex((item) => item.id === req.params.messageId);
+    const message = db.messages[index];
+    const room = roomForMessage(req.user.id, message);
+    if (!message || !room) return res.status(404).json({ error: 'Message not found.' });
+    const channel = message.scope === 'channel' ? db.channels.find((item) => item.id === message.channelId) : null;
+    if (message.authorId !== req.user.id && !(channel && canManage(req.user.id, channel.serverId))) return res.status(403).json({ error: 'You can only remove your own messages.' });
+    db.messages.splice(index, 1); await save(); io.to(room).emit('chat:delete', { messageId: message.id });
+    res.json({ ok: true });
+  });
+  app.put('/api/messages/:messageId/reactions', requireAuth, async (req, res) => {
+    const message = db.messages.find((item) => item.id === req.params.messageId);
+    const room = roomForMessage(req.user.id, message);
+    if (!message || !room) return res.status(404).json({ error: 'Message not found.' });
+    const emoji = z.enum(['👍', '❤️', '😂', '🎉', '🔥', '😮', '😢', '👏']).safeParse(req.body?.emoji);
+    if (!emoji.success) return res.status(400).json({ error: 'Choose a supported reaction.' });
+    const reactions = message.reactions || [];
+    const current = reactions.find((item) => item.emoji === emoji.data);
+    if (current?.userIds.includes(req.user.id)) {
+      current.userIds = current.userIds.filter((id) => id !== req.user.id);
+      if (!current.userIds.length) message.reactions = reactions.filter((item) => item !== current);
+    } else if (current) current.userIds.push(req.user.id);
+    else message.reactions = [...reactions, { emoji: emoji.data, userIds: [req.user.id] }];
+    await save(); io.to(room).emit('chat:update', message);
+    res.json({ message });
+  });
 
   io.use((socket, next) => {
     const raw = cookieValue(socket.handshake.headers.cookie, 'core_session');
@@ -410,8 +499,13 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     socket.emit('presence:snapshot', [...visibleIds].filter((userId) => (socketsByUser.get(userId)?.size || 0) > 0 && db.users.find((item) => item.id === userId)?.status !== 'invisible'));
     emitPresence(user.id);
     socket.on('chat:send', async (payload, ack = () => {}) => {
-      const text = z.string().trim().min(1).max(2000).safeParse(payload?.text);
-      if (!text.success) return ack({ error: 'Messages can be up to 2,000 characters.' });
+      const text = z.string().trim().max(2000).safeParse(payload?.text ?? '');
+      const attachments = z.array(z.object({ url: z.string().min(1).max(220), name: z.string().min(1).max(140), mime: z.string().max(80), size: z.number().int().min(1).max(10 * 1024 * 1024) })).max(5).safeParse(payload?.attachments ?? []);
+      if (!text.success || !attachments.success || (!text.data && !attachments.data.length)) return ack({ error: 'Write a message or add up to five supported attachments.' });
+      for (const attachment of attachments.data) {
+        const filename = path.basename(attachment.url);
+        if (attachment.url !== `/uploads/${filename}` || !filename.startsWith(`${user.id}-`) || !(await fs.stat(path.join(uploadDir, filename)).then(() => true).catch(() => false))) return ack({ error: 'One of those attachments is no longer available.' });
+      }
       let room; let message;
       if (payload?.scope === 'channel') {
         const channel = db.channels.find((c) => c.id === payload.channelId);
@@ -424,7 +518,7 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
         room = `dm:${conversation.id}`;
         message = { id: id(), scope: 'dm', conversationId: conversation.id };
       } else return ack({ error: 'Choose a conversation first.' });
-      Object.assign(message, { authorId: user.id, author: user.name, handle: user.handle, avatar: user.avatar, text: text.data, createdAt: new Date().toISOString() });
+      Object.assign(message, { authorId: user.id, author: user.name, handle: user.handle, avatar: user.avatar, text: text.data, attachments: attachments.data, reactions: [], createdAt: new Date().toISOString() });
       db.messages.push(message);
       await save();
       io.to(room).emit('chat:message', message);
@@ -450,16 +544,23 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
       const roomId = isDirect ? `dmvoice:${conversation.id}` : channel.id;
       const room = voiceRooms.get(roomId) || new Map();
       if (isDirect && room.size >= 2) return ack({ error: 'This private call already has both people in it.' });
-      const participants = [...room.entries()].map(([socketId, userId]) => ({ socketId, user: safeUser(db.users.find((item) => item.id === userId)) }));
+      const participants = [...room.entries()].map(([socketId, userId]) => { const state = io.sockets.sockets.get(socketId)?.data || {}; return { socketId, user: safeUser(db.users.find((item) => item.id === userId)), cameraOn: Boolean(state.cameraOn), sharing: Boolean(state.sharing) }; });
       socket.join(`voice:${roomId}`);
       socket.data.voiceChannel = roomId;
       socket.data.voiceConversation = conversation?.id || null;
+      socket.data.cameraOn = false; socket.data.sharing = false;
       room.set(socket.id, user.id);
       voiceRooms.set(roomId, room);
       ack({ participants });
       socket.to(`voice:${roomId}`).emit('voice:peer-joined', { socketId: socket.id, user: safeUser(user) });
       if (isDirect) io.to(`dm:${conversation.id}`).emit('voice:dm-presence', { conversationId: conversation.id, count: room.size });
       else io.to(`server:${channel.serverId}`).emit('voice:presence', { channelId: channel.id, count: room.size });
+    });
+    socket.on('voice:media-state', ({ cameraOn, sharing } = {}) => {
+      const roomId = socket.data.voiceChannel;
+      if (!roomId || !voiceRooms.get(roomId)?.has(socket.id)) return;
+      socket.data.cameraOn = Boolean(cameraOn); socket.data.sharing = Boolean(sharing);
+      socket.to(`voice:${roomId}`).emit('voice:media-state', { socketId: socket.id, cameraOn: socket.data.cameraOn, sharing: socket.data.sharing });
     });
     socket.on('voice:leave', () => leaveVoice(socket));
     socket.on('voice:signal', ({ target, signal } = {}) => {
@@ -486,6 +587,7 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
     socket.to(`voice:${channelId}`).emit('voice:peer-left', { socketId: socket.id });
     socket.data.voiceChannel = null;
     socket.data.voiceConversation = null;
+    socket.data.cameraOn = false; socket.data.sharing = false;
     if (room && !room.size) voiceRooms.delete(channelId);
     const channel = db.channels.find((c) => c.id === channelId);
     if (conversationId) io.to(`dm:${conversationId}`).emit('voice:dm-presence', { conversationId, count: room?.size || 0 });
@@ -508,3 +610,4 @@ async function startServer({ port = 4179, host = '127.0.0.1', dataDir = path.joi
 }
 
 module.exports = { startServer };
+

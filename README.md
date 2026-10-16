@@ -6,11 +6,13 @@ CORE is a Windows-first desktop chat app with a quieter, more considered take on
 
 - Create an account, sign in, edit a profile, set presence, and choose an accent theme.
 - Create spaces and text or voice channels. Invite links can be copied, accepted, revoked by a space owner or admin, and configured to expire in one hour to 30 days.
-- Send live channel and one-to-one messages, see typing and presence, browse recent history, and start one-to-one calls.
-- Join voice rooms with microphone mute, deafen, camera, and screen-share controls. The Windows desktop app prompts you to choose the screen or app window to share.
+- Send live channel and one-to-one messages, edit or remove your own messages, add shared reactions, see typing and presence, browse recent history, and start one-to-one calls.
+- Share up to five validated image, video, audio, PDF, or text attachments per message (10 MB each).
+- Join voice rooms with microphone mute, deafen, camera, and screen-share controls. CORE shows when a participant has their camera on or is sharing; the Windows desktop app prompts you to choose the screen or app window.
 - Crop, zoom, and reposition JPG, PNG, or WebP profile and space artwork. Images are limited to 8 MB.
 - Upload and manage space emojis, stickers, and soundboard clips. Images are limited to 8 MB and audio to 10 MB.
-- Use the built-in emoji, sticker, and soundboard choices, and switch among four color themes.
+- Edit a space name and description, update its icon and banner, and manage members, invites, and shared assets.
+- Use the built-in emoji, sticker, and soundboard choices, and switch among four accent themes, light appearance, or system appearance.
 - Configure server and member roles. Server and channel endpoints check membership, and space asset and role management is restricted to owners and admins.
 
 ## Run the desktop app
@@ -80,7 +82,7 @@ Calls use peer-to-peer WebRTC. STUN can establish many connections; networks tha
 - **Storage:** A JSON file is atomically replaced on writes; uploads are stored alongside it. Back up the full `CORE_DATA_DIR` while the service is stopped. This simple single-process storage is suitable for a small group, not a high-traffic service or multiple server replicas.
 - **Input:** API payloads are validated, message and image/audio sizes are bounded, and uploaded file signatures are checked. Keep the service behind HTTPS for remote use.
 
-This is an early usable build. It does not include email verification, password recovery, end-to-end message encryption, group DMs, moderation audit history, or an SFU. Media and voice calls require browser/OS microphone and camera access. Soundboard audio plays locally for the person who selects a sound; it is not mixed into voice chat. Invitations are web links to the shared CORE service and need that service to be reachable by invitees.
+This is an early usable build, not a full implementation of every item in the supplied Discord feature inventory. It does not include email verification, password recovery, end-to-end message encryption, group DMs, threads, message search, polls, scheduled events, moderation audit history, bot/app integrations, or an SFU. There is no paid tier or billing. Media and voice calls require browser/OS microphone and camera access. Screen selection is provided by the Windows desktop picker. Screen and camera video use peer-to-peer WebRTC; larger calls need an SFU. TURN can improve connectivity on restrictive networks. Soundboard audio plays locally for the person who selects a sound; it is not mixed into voice chat. Invitations are web links to the shared CORE service and need that service to be reachable by invitees.
 
 ## Windows releases on GitHub
 
@@ -99,3 +101,4 @@ git push origin v1.0.0
 In GitHub, ensure **Settings → Actions → General → Workflow permissions** allows the repository `GITHUB_TOKEN` to write contents. The release job declares `contents: write`; it uses GitHub's automatically provided token and needs no personal access token or secret. Wait for the tagged workflow run to finish, then download the installer from the Releases page. Increase the version in `package.json` and use a new tag for each release.
 
 The installer target is NSIS x64. The workflow does not sign the binary; configure a code-signing certificate separately if you need a trusted publisher identity.
+
