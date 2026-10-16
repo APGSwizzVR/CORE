@@ -1,6 +1,6 @@
 {
   "name": "core-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "CORE — a calmer place to talk",
   "author": "CORE",
@@ -68,3 +68,4 @@
     }
   }
 }
+

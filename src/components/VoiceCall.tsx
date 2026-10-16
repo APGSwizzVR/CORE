@@ -14,9 +14,10 @@ type Quality = '720' | '1080';
 const ICE: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function getMediaError(error: unknown, kind: 'microphone' | 'camera') {
-  const name = error instanceof DOMException ? error.name : '';
+  const name = error && typeof error === 'object' && 'name' in error ? String((error as { name?: unknown }).name || '') : '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
-    return { title: `${kind === 'camera' ? 'Camera' : 'Microphone'} permission is off`, detail: `Allow CORE to use your ${kind} in Windows Settings, then come back and try again. If the app is already allowed, close other apps using the device.`, privacy: true };
+    const deviceName = kind === 'camera' ? 'Camera' : 'Microphone';
+    return { title: `${deviceName} permission is off`, detail: `In Windows, open Settings → Privacy & security → ${deviceName}, turn on device access and “Let desktop apps access your ${kind}”, then return to CORE and try again. Close other apps using the device.`, privacy: true };
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
     return { title: `No ${kind} found`, detail: `Connect a ${kind}, then choose it from Device settings. You can still join and listen without a microphone.`, privacy: false };
@@ -27,7 +28,7 @@ function getMediaError(error: unknown, kind: 'microphone' | 'camera') {
   if (name === 'OverconstrainedError') {
     return { title: 'That device setting isn’t available', detail: 'Choose another device or select System default, then try again.', privacy: false };
   }
-  return { title: `Couldn’t start your ${kind}`, detail: 'Check the selected device and Windows privacy settings. You can open device settings below and retry.', privacy: true };
+  return { title: `Couldn’t start your ${kind}`, detail: `Check that a ${kind} is connected, choose System default under Devices, and confirm Windows lets desktop apps use it. You can open Windows settings below and retry.`, privacy: true };
 }
 
 function useVideoSource(stream?: MediaStream) {
@@ -324,7 +325,7 @@ export default function VoiceCall({ channelId, channelName, socket, user, onLeav
       <label>Speaker<select value={speakerId} onChange={(event) => setSpeakerId(event.target.value)}><option value="">System default</option>{speakers.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label}</option>)}</select><small>Output routing uses Windows device selection when available.</small></label>
       <label>Camera quality<select value={quality} onChange={(event) => setQuality(event.target.value as Quality)}><option value="720">720p · balanced</option><option value="1080">1080p · sharper</option></select><small>Actual quality depends on your camera and connection.</small></label>
     </div><div className="device-panel-footer"><button className={`ptt-toggle ${ptt ? 'active' : ''}`} onClick={() => { setPtt((value) => !value); setPttHeld(false); }}><kbd>Space</kbd>{ptt ? 'Push to talk on' : 'Turn on push to talk'}</button><button className="text-button" onClick={() => void enumerateDevices()}>Refresh devices</button></div></div>}
-    {viewError && <div className={`call-error ${viewError.privacy ? 'permission-error' : ''}`} role="alert"><div className="call-error-icon">{viewError.privacy ? <MicOff size={19} /> : <Signal size={18} />}</div><div><strong>{viewError.title}</strong><p>{viewError.detail}</p><div className="call-error-actions">{viewError.privacy && window.coreDesktop && <button className="button subtle small" onClick={() => void window.coreDesktop?.openPrivacySettings(viewError.title.toLowerCase().includes('camera') ? 'camera' : 'microphone')}>Open Windows privacy settings</button>}{!audioReady && <button className="button subtle small" onClick={() => void joinRoom(false)}><Headphones size={14} />Join and listen</button>}{audioReady && <button className="text-button" onClick={() => setError(null)}>Dismiss</button>}</div></div></div>}
+    {viewError && <div className={`call-error ${viewError.privacy ? 'permission-error' : ''}`} role="alert"><div className="call-error-icon">{viewError.privacy ? viewError.title.toLowerCase().includes('camera') ? <CameraOff size={19} /> : <MicOff size={19} /> : <Signal size={18} />}</div><div><strong>{viewError.title}</strong><p>{viewError.detail}</p><div className="call-error-actions">{viewError.privacy && window.coreDesktop && <button className="button subtle small" onClick={() => void window.coreDesktop?.openPrivacySettings(viewError.title.toLowerCase().includes('camera') ? 'camera' : 'microphone')}>Open Windows privacy settings</button>}{!audioReady && <button className="button subtle small" onClick={() => void joinRoom(false)}><Headphones size={14} />Join and listen</button>}{audioReady && <button className="text-button" onClick={() => setError(null)}>Dismiss</button>}</div></div></div>}
     <div className={`call-stage ${peers.length + 1 <= 2 ? 'single-stage' : ''}`}>
       {audioReady && <VideoTile name={user.name} avatar={user.avatar} media={localPeers} muted={muted || (ptt && !pttHeld)} local cameraOn={cameraOn} sharing={sharing} />}
       {peers.map((peer) => <VideoTile key={peer.socketId} name={peer.user.name} avatar={peer.user.avatar} media={streams[peer.socketId]} deafened={deafened} cameraOn={peer.cameraOn} sharing={peer.sharing} outputDeviceId={speakerId} />)}
@@ -334,3 +335,4 @@ export default function VoiceCall({ channelId, channelName, socket, user, onLeav
     {screenPickerOpen && <ScreenPicker onClose={() => setScreenPickerOpen(false)} onShare={(sourceId) => { void startShare(sourceId); }} />}
   </section>;
 }
+

@@ -7,7 +7,7 @@ CORE has no premium tier, billing flow, or paid communication features.
 ## What works in this build
 
 - Accounts, sign-in/out, salted password hashing, profile details, avatar/banner image crop, presence states, and accent themes.
-- Spaces with custom names, descriptions, cropped icons and banners; invite links that can be copied, accepted, revoked, and set to expire.
+- Spaces with custom names, descriptions, cropped icons and banners; random 8-character invite codes with use caps and expiry, direct friend invitations, acceptance, and revocation.
 - Text and voice channels with categories, topics, private member access, and text slow mode. Private-channel access is checked by the HTTP API and live Socket.IO rooms.
 - Owner/admin/member space roles, member lists, role changes, and message reports with a moderator review queue.
 - Live server chat and one-to-one DMs, group DMs (up to ten people), message edits/deletion, reactions, threads, pins, polls, history search with author/date/attachment filters, and attachment previews.
@@ -16,6 +16,7 @@ CORE has no premium tier, billing flow, or paid communication features.
 - Microphone calls, camera video, screen/window sharing, mute/deafen, device selectors, camera quality, push-to-talk, connection state, and a dedicated Windows screen/window picker.
 - Crop, zoom, reposition, and preview JPG/PNG/WebP profile and space art. Image and file type/size validation runs on the server as well as in the interface.
 - Message formatting for bold, italic, strike-through, inline/fenced code, headings, lists, quotes, links, spoilers, and uploaded space emoji/stickers.
+- Clickable chat avatars open a compact profile card with the person’s avatar, banner, handle, bio, and live presence.
 
 ## Run CORE on Windows
 
@@ -90,15 +91,16 @@ This is a working early build, not a feature-for-feature Discord replacement. Em
 
 `.github/workflows/build-windows.yml` builds an installer on pushes to `main` and manual runs. The installer is attached to the workflow run as a downloadable Actions artifact.
 
-`.github/workflows/release-windows.yml` builds the Windows installer when a version tag such as `v1.2.0` is pushed, attaches it to the GitHub Release, and also stores it as an Actions artifact.
+`.github/workflows/release-windows.yml` builds the Windows installer when a version tag such as `v1.2.1` is pushed, attaches it to the GitHub Release, and also stores it as an Actions artifact.
 
 To publish a release from a checkout:
 
 ```powershell
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.2.1
+git push origin v1.2.1
 ```
 
 The release workflow declares `contents: write` and uses GitHub's automatic `GITHUB_TOKEN`; it needs no personal access token or workflow secret. In **Settings → Actions → General → Workflow permissions**, allow GitHub Actions to create releases/write repository contents. Increase the version in both `package.json` and `package-lock.json` and use a new tag for every release.
 
 The current public repository is [APGSwizzVR/CORE](https://github.com/APGSwizzVR/CORE). After the tagged Actions run finishes, download the unsigned x64 installer from its [Releases page](https://github.com/APGSwizzVR/CORE/releases).
+

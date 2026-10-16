@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  create:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -37,3 +40,4 @@ jobs:
           files: release/*.exe
           draft: false
           prerelease: false
+
