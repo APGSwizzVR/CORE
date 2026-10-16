@@ -1,0 +1,17 @@
+services:
+  core:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: 4179
+      CORE_BIND_ADDRESS: 0.0.0.0
+      CORE_DATA_DIR: /data
+      CORE_PUBLIC_URL: ${CORE_PUBLIC_URL:-}
+      CORE_ALLOWED_ORIGINS: ${CORE_ALLOWED_ORIGINS:-http://127.0.0.1:4179,http://127.0.0.1:5173}
+    ports:
+      - "127.0.0.1:4179:4179"
+    volumes:
+      - core-data:/data
+
+volumes:
+  core-data:

@@ -1,0 +1,39 @@
+name: Publish Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build the Windows installer
+        run: npm run package:win
+      - name: Save installer to the Actions run
+        uses: actions/upload-artifact@v4
+        with:
+          name: CORE-Windows-Installer-${{ github.ref_name }}
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish installer on the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CORE ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*.exe
+          draft: false
+          prerelease: false
